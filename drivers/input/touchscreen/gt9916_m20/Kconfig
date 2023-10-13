@@ -1,7 +1,7 @@
 #
 # Goodix touchscreen driver configuration
 #
-config TOUCHSCREEN_GOODIX_BRL_9916
+config TOUCHSCREEN_GOODIX_BRL_9916_M20
 	tristate "Goodix berlin touchscreen"
 	default n
 	help

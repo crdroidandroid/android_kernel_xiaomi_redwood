@@ -3,6 +3,7 @@
  * Copyright (c) 2012-2015, 2019 The Linux Foundation. All rights reserved.
  * Copyright (C) 2017 Linaro Ltd.
  */
+#include <linux/mm.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/module.h>
@@ -752,6 +753,11 @@ void *qmi_encode_message(int type, unsigned int msg_id, size_t *len,
 	ssize_t msglen = 0;
 	void *msg;
 	int ret;
+	size_t hdr_sz = sizeof(*hdr);
+	size_t payload_len = *len;
+	size_t alloc_len;
+	struct sysinfo si;
+	unsigned long free_kb;
 
 	/* Check the possibility of a zero length QMI message */
 	if (!c_struct) {
@@ -763,9 +769,22 @@ void *qmi_encode_message(int type, unsigned int msg_id, size_t *len,
 		}
 	}
 
-	msg = kzalloc(sizeof(*hdr) + *len, GFP_KERNEL);
-	if (!msg)
+	si_meminfo(&si);
+	free_kb = (unsigned long)(si.freeram * (PAGE_SIZE >> 10));
+
+	if (payload_len > (size_t)-1 - hdr_sz)
+		pr_err("IPA_QMI_FAIL: stage=encode_overflow pid=%d comm=%s msg_id=%u hdr=%zu payload=%zu free_kb=%lu\n",
+		       current->pid, current->comm, msg_id,
+		       hdr_sz, payload_len, free_kb);
+
+	alloc_len = hdr_sz + payload_len;
+	msg = kzalloc(alloc_len, GFP_KERNEL);
+	if (!msg) {
+		pr_err("IPA_QMI_FAIL: stage=qmi_alloc_fail pid=%d comm=%s msg_id=%u hdr=%zu payload=%zu alloc_needed=%zu free_kb=%lu\n",
+		       current->pid, current->comm, msg_id,
+		       hdr_sz, payload_len, alloc_len, free_kb);
 		return ERR_PTR(-ENOMEM);
+	}
 
 	/* Encode message, if we have a message */
 	if (c_struct) {

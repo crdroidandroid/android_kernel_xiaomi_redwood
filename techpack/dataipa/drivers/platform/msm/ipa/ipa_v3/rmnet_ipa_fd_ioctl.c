@@ -8,6 +8,7 @@
 #include <linux/fs.h>
 #include <linux/cdev.h>
 #include <linux/device.h>
+#include <linux/mm.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/rmnet_ipa_fd_ioctl.h>
@@ -120,6 +121,8 @@ static long ipa3_wan_ioctl(struct file *filp,
 		param = memdup_user((const void __user *)arg, pyld_sz);
 		if (IS_ERR(param)) {
 			retval = PTR_ERR(param);
+			pr_err("IPA_QMI: stage=memdup_user_fail pyld_sz=%u retval=%d free_kb=%lu pid=%d comm=%s\n",
+			       pyld_sz, retval, ipa_qmi_free_kb(), current->pid, current->comm);
 			break;
 		}
 		if (ipa3_qmi_filter_request_ex_send(

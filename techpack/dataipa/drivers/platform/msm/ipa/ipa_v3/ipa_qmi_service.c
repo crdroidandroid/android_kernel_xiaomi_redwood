@@ -494,6 +494,11 @@ static int ipa3_qmi_send_req_wait(struct qmi_handle *client_handle,
 
 
 	if (ret < 0) {
+		pr_err("IPA_QMI_FAIL: stage=qmi_send_ret pid=%d comm=%s req_msg_id=%u max_msg_len=%zu rc=%d free_kb=%lu\n",
+		       current->pid, current->comm,
+		       req_desc ? req_desc->msg_id : 0,
+		       req_desc ? req_desc->max_msg_len : 0,
+		       ret, ipa_qmi_free_kb());
 		qmi_txn_cancel(&txn);
 		mutex_unlock(&ipa3_qmi_lock);
 		return ret;

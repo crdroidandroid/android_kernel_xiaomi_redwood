@@ -3073,5 +3073,12 @@ static inline int seal_check_future_write(int seals, struct vm_area_struct *vma)
 	return 0;
 }
 
+static inline unsigned long ipa_qmi_free_kb(void)
+{
+	struct sysinfo si;
+	si_meminfo(&si);
+	return (unsigned long)(si.freeram * (PAGE_SIZE >> 10));
+}
+
 #endif /* __KERNEL__ */
 #endif /* _LINUX_MM_H */

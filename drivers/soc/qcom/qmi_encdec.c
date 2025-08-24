@@ -778,7 +778,7 @@ void *qmi_encode_message(int type, unsigned int msg_id, size_t *len,
 		       hdr_sz, payload_len, free_kb);
 
 	alloc_len = hdr_sz + payload_len;
-	msg = kzalloc(alloc_len, GFP_KERNEL);
+	msg = kvzalloc(alloc_len, GFP_KERNEL);
 	if (!msg) {
 		pr_err("IPA_QMI_FAIL: stage=qmi_alloc_fail pid=%d comm=%s msg_id=%u hdr=%zu payload=%zu alloc_needed=%zu free_kb=%lu\n",
 		       current->pid, current->comm, msg_id,
@@ -790,7 +790,7 @@ void *qmi_encode_message(int type, unsigned int msg_id, size_t *len,
 	if (c_struct) {
 		msglen = qmi_encode(ei, msg + sizeof(*hdr), c_struct, *len, 1);
 		if (msglen < 0) {
-			kfree(msg);
+			kvfree(msg);
 			return ERR_PTR(msglen);
 		}
 	}

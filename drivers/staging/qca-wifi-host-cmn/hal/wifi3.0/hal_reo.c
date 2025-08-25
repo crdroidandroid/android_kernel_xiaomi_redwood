@@ -457,8 +457,8 @@ inline int hal_reo_cmd_queue_stats(hal_ring_handle_t  hal_ring_hdl,
 	if (hif_pm_runtime_get(hal_soc->hif_handle,
 			       RTPM_ID_HAL_REO_CMD, true) == 0) {
 		hal_srng_access_end(hal_soc_hdl, hal_ring_hdl);
-		hif_pm_runtime_put(hal_soc->hif_handle,
-				   RTPM_ID_HAL_REO_CMD);
+		hif_pm_runtime_put_noidle(hal_soc->hif_handle,
+					  RTPM_ID_HAL_REO_CMD);
 	} else {
 		hal_srng_access_end_reap(hal_soc_hdl, hal_ring_hdl);
 		hal_srng_set_event(hal_ring_hdl, HAL_SRNG_FLUSH_EVENT);

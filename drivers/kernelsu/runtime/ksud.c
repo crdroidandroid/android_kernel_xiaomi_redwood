@@ -54,6 +54,9 @@ void on_post_fs_data(void)
 	ksu_load_allow_list();
 	// sanity check, this may influence the performance
 	stop_input_hook();
+
+	// retry forced features which failed at second stage
+	ksu_feature_apply_forced();
 }
 
 extern void ext4_unregister_sysfs(struct super_block *sb);
@@ -90,6 +93,10 @@ void on_boot_completed(void)
 	ksu_boot_completed = true;
 	pr_info("on_boot_completed!\n");
 	track_throne(true);
+
+#ifdef CONFIG_KSU_HOSTSREDIRECT
+	ksu_hostsredirect_init();
+#endif
 }
 
 static ssize_t (*orig_read)(struct file *, char __user *, size_t, loff_t *);
@@ -187,7 +194,7 @@ static void free_module_rc(void)
 	module_rc_len = 0;
 }
 
-static inline void set_module_rc_len_vfs()
+static noinline void set_module_rc_len_vfs()
 {
 	static bool loaded = false;
 	if (loaded)
@@ -200,7 +207,6 @@ static inline void set_module_rc_len_vfs()
 	int err = kern_path(MODULE_RC_PATH_WATCHDOG, LOOKUP_FOLLOW, &path);
 	if (err)
 		err = kern_path(MODULE_RC_PATH_DEFAULT, LOOKUP_FOLLOW, &path);
-
 	if (err)
 		return; 
 
@@ -213,7 +219,7 @@ static inline void set_module_rc_len_vfs()
 	if (module_rc_len > MODULE_RC_MAX)
 		module_rc_len = MODULE_RC_MAX;
 
-	pr_info("module_rc_len: %zu\n", module_rc_len);
+	pr_info("%s: %zu\n", __func__, module_rc_len);
 
 	return;
 }
@@ -335,8 +341,9 @@ append_module_rc:
 
 static bool is_init_rc(struct file *fp)
 {
-	if (strcmp(current->comm, "init")) {
-		// we are only interest in `init` process
+	// we are only interested in `init-like` process
+	// catch generic_init, init
+	if (!strstr(current->comm, "init")) {
 		return false;
 	}
 
@@ -367,14 +374,6 @@ static bool is_init_rc(struct file *fp)
 
 static noinline void ksu_install_rc_hook(struct file *file)
 {
-	if (!is_init(current_cred()))
-		return;
-
-	// if init process is running, always try to grab module_rc length
-	// this is because we are also running newfstat hook on kprobe
-	// and we really cannot kern_path on it
-	set_module_rc_len_vfs();
-
 	if (!is_init_rc(file)) {
 		return;
 	}
@@ -395,6 +394,7 @@ static noinline void ksu_install_rc_hook(struct file *file)
 	cache_sid();
 	setup_ksu_cred();
 	ksu_grab_init_session_keyring();
+	ksu_feature_apply_forced();
 
 	// now we can sure that the init process is reading
 	// `/system/etc/init/init.rc`
@@ -429,9 +429,6 @@ static noinline void ksu_handle_sys_read_fd(unsigned int fd)
 	if (likely(!ksu_vfs_read_hook))
 		return;
 
-	if (!is_init(current_cred()))
-		return;
-
 	struct file *file = fget(fd);
 	if (!file) {
 		return;
@@ -446,9 +443,6 @@ static noinline void ksu_handle_sys_read_fd(unsigned int fd)
 static inline void ksu_common_newfstat_ret(unsigned int fd_int, void **statbuf_ptr, 
 			const int type, const char *syscall_name)
 {
-	if (!is_init(current_cred()))
-		return;
-
 	struct file *file = fget(fd_int);
 	if (!file)
 		return;
@@ -463,6 +457,12 @@ static inline void ksu_common_newfstat_ret(unsigned int fd_int, void **statbuf_p
 	void __user *statbuf = (void __user *)statbuf_ptr_local;
 	if (!statbuf)
 		return;
+
+	// if init process is running, try to grab module_rc length
+	// preempt check is because we are also running newfstat hook on kprobe
+	// and we really cannot kern_path on it safely
+	if (preemptible())
+		set_module_rc_len_vfs();
 
 	pr_info("%s: stat init.rc \n", syscall_name);
 
@@ -484,7 +484,7 @@ static inline void ksu_common_newfstat_ret(unsigned int fd_int, void **statbuf_p
 	
 	struct stat64 k_stat64 = { 0 };
 
-	if (ksu_copy_from_user_retry(&k_stat64, statbuf, sizeof(struct stat64))) {
+	if (copy_from_user_retry(&k_stat64, statbuf, sizeof(struct stat64))) {
 		pr_info("%s: read statbuf 0x%lx failed \n", syscall_name, (uintptr_t)statbuf);
 		goto out;
 	}
@@ -503,13 +503,12 @@ static inline void ksu_common_newfstat_ret(unsigned int fd_int, void **statbuf_p
 
 	goto out;
 
-stat_native:
+stat_native:;
 #endif
-	;
 
 	struct stat k_stat = { 0 };
 
-	if (ksu_copy_from_user_retry(&k_stat, statbuf, sizeof(struct stat))) {
+	if (copy_from_user_retry(&k_stat, statbuf, sizeof(struct stat))) {
 		pr_info("%s: read statbuf 0x%lx failed \n", syscall_name, (uintptr_t)statbuf);
 		goto out;
 	}
@@ -691,10 +690,12 @@ static int vol_detector_exit()
 	return 0;
 }
 
-// we do this so that if theres no ksud to call on_post_fs_data/ksu_is_safe_mode/on_boot_completed
-// there will be no input handler / extra execve branch that stays around
-// 60s is more than enough time from second_stage to decrypt/post_fs_data
-// if theres no ksud that does that, we trigger the closing of hooks ourselves
+/**
+ * we do this so that if theres no ksud to call on_post_fs_data/ksu_is_safe_mode/on_boot_completed
+ * there will be no input handler / extra execve branch that stays around
+ * 60s is more than enough time from second_stage to decrypt/post_fs_data
+ * if theres no ksud that does that, we trigger the closing of hooks ourselves
+ */
 static int ksu_hook_watchdog(void *data)
 {
 	unsigned int i = 0;
